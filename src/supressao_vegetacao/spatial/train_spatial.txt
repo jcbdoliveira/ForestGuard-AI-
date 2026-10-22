@@ -1,0 +1,312 @@
+"""
+Treino espacial com XGBoost (preferencial) ou GradientBoosting do scikit-learn.
+
+- Split temporal (não aleatório)
+- Métricas REAIS no conjunto de teste: ROC-AUC, PR-AUC, Brier, recall@top10%
+- Persistência do modelo + metadata JSON
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+
+from .panel import Panel, load_panel_csv, temporal_split
+
+try:
+    import xgboost as xgb
+    HAS_XGB = True
+except ImportError:
+    HAS_XGB = False
+
+# sklearn importado sob demanda em _fit_sklearn()
+
+
+@dataclass
+class SpatialTrainResult:
+    model_type: str
+    feature_names: List[str]
+    target_col: str
+    metrics_test: Dict[str, float]
+    metrics_valid: Dict[str, float] = field(default_factory=dict)
+    train_years: List[int] = field(default_factory=list)
+    valid_year: Optional[int] = None
+    test_year: Optional[int] = None
+    n_train: int = 0
+    n_valid: int = 0
+    n_test: int = 0
+    positive_rate_test: float = 0.0
+    feature_importance: List[Dict[str, float]] = field(default_factory=list)
+    model_path: Optional[str] = None
+    # Medianas do treino — usadas na inferência quando a célula não traz o raster
+    feature_medians: Dict[str, float] = field(default_factory=dict)
+    training_note: str = (
+        "Artefato de treinamento. Importâncias refletem o painel usado no treino "
+        "(pode ser sintético de desenvolvimento). Não são pesos causais."
+    )
+
+
+def evaluate_binary(y_true: np.ndarray, y_prob: np.ndarray) -> Dict[str, float]:
+    from sklearn.metrics import (
+        average_precision_score,
+        brier_score_loss,
+        roc_auc_score,
+    )
+    y_true = np.asarray(y_true).astype(int)
+    y_prob = np.asarray(y_prob, dtype=float)
+    out: Dict[str, float] = {"n": int(len(y_true)), "positive_rate": float(y_true.mean()) if len(y_true) else 0.0}
+    if len(y_true) == 0 or len(np.unique(y_true)) < 2:
+        out.update({
+            "roc_auc": float("nan"),
+            "pr_auc": float("nan"),
+            "brier": float("nan"),
+            "recall_at_top10pct": float("nan"),
+        })
+        return out
+    out["roc_auc"] = float(roc_auc_score(y_true, y_prob))
+    out["pr_auc"] = float(average_precision_score(y_true, y_prob))
+    out["brier"] = float(brier_score_loss(y_true, y_prob))
+    # Recall nos top 10% scores
+    k = max(1, int(0.10 * len(y_prob)))
+    top_idx = np.argsort(y_prob)[::-1][:k]
+    out["recall_at_top10pct"] = float(y_true[top_idx].sum() / max(y_true.sum(), 1))
+    return {k: (round(v, 6) if isinstance(v, float) else v) for k, v in out.items()}
+
+
+def _fit_xgboost(
+    X_tr, y_tr, X_va, y_va, seed: int = 42
+) -> Tuple[Any, np.ndarray]:
+    pos = max(float(y_tr.sum()), 1.0)
+    neg = max(float(len(y_tr) - y_tr.sum()), 1.0)
+    spw = neg / pos
+    model = xgb.XGBClassifier(
+        n_estimators=400,
+        max_depth=5,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        reg_lambda=1.0,
+        objective="binary:logistic",
+        eval_metric="aucpr",
+        scale_pos_weight=spw,
+        random_state=seed,
+        n_jobs=2,
+        early_stopping_rounds=40 if X_va is not None and len(y_va) else None,
+    )
+    if X_va is not None and len(y_va) > 0:
+        model.fit(X_tr, y_tr, eval_set=[(X_va, y_va)], verbose=False)
+    else:
+        model.fit(X_tr, y_tr)
+    return model, model.predict_proba(X_tr)[:, 1]
+
+
+def _fit_sklearn_gbm(X_tr, y_tr, seed: int = 42):
+    from sklearn.ensemble import GradientBoostingClassifier
+    model = GradientBoostingClassifier(
+        n_estimators=200,
+        max_depth=3,
+        learning_rate=0.05,
+        subsample=0.8,
+        random_state=seed,
+    )
+    model.fit(X_tr, y_tr)
+    return model
+
+
+def train_spatial_model(
+    panel: Panel,
+    target_col: str = "y_loss_3y",
+    test_year: Optional[int] = None,
+    valid_year: Optional[int] = None,
+    model_dir: Optional[str | Path] = None,
+    prefer_xgboost: bool = True,
+    seed: int = 42,
+) -> Tuple[Any, SpatialTrainResult]:
+    split = temporal_split(panel, test_year=test_year, valid_year=valid_year)
+    X_tr, y_tr = split["train"]
+    X_te, y_te = split["test"]
+    years_sorted, v_year, t_year = split["years"]
+    X_va = y_va = None
+    if "valid" in split:
+        X_va, y_va = split["valid"]
+
+    use_xgb = prefer_xgboost and HAS_XGB
+    if use_xgb:
+        model, _ = _fit_xgboost(X_tr, y_tr, X_va, y_va, seed=seed)
+        model_type = "XGBoostClassifier"
+        proba_te = model.predict_proba(X_te)[:, 1]
+        proba_va = model.predict_proba(X_va)[:, 1] if X_va is not None else None
+        importances = model.feature_importances_
+    else:
+        model = _fit_sklearn_gbm(X_tr, y_tr, seed=seed)
+        model_type = "sklearn.GradientBoostingClassifier"
+        proba_te = model.predict_proba(X_te)[:, 1]
+        proba_va = model.predict_proba(X_va)[:, 1] if X_va is not None else None
+        importances = model.feature_importances_
+
+    metrics_test = evaluate_binary(y_te, proba_te)
+    metrics_valid = evaluate_binary(y_va, proba_va) if proba_va is not None else {}
+
+    fi = [
+        {"feature": n, "importance": round(float(v), 6)}
+        for n, v in sorted(
+            zip(panel.feature_names, importances),
+            key=lambda kv: -kv[1],
+        )
+    ]
+
+    # Medianas do treino (para imputação documentada na inferência sem rasters)
+    medians: Dict[str, float] = {}
+    if panel.X is not None and len(panel.feature_names) == panel.X.shape[1]:
+        for j, name in enumerate(panel.feature_names):
+            col = panel.X[:, j]
+            valid = col[np.isfinite(col)]
+            medians[name] = float(np.median(valid)) if len(valid) else 0.0
+
+    result = SpatialTrainResult(
+        model_type=model_type,
+        feature_names=list(panel.feature_names),
+        target_col=target_col,
+        metrics_test=metrics_test,
+        metrics_valid=metrics_valid,
+        train_years=[y for y in years_sorted if (v_year is None or y < v_year) and y < t_year],
+        valid_year=v_year,
+        test_year=t_year,
+        n_train=int(len(y_tr)),
+        n_valid=int(len(y_va)) if y_va is not None else 0,
+        n_test=int(len(y_te)),
+        positive_rate_test=float(y_te.mean()) if len(y_te) else 0.0,
+        feature_importance=fi,
+        feature_medians=medians,
+    )
+
+    if model_dir is not None:
+        model_dir = Path(model_dir)
+        model_dir.mkdir(parents=True, exist_ok=True)
+        # 1) salva o modelo primeiro e define model_path
+        if use_xgb:
+            model_path = model_dir / "spatial_model.json"
+            model.save_model(str(model_path))
+            result.model_path = str(model_path)
+        else:
+            import pickle
+            model_path = model_dir / "spatial_model.pkl"
+            with model_path.open("wb") as f:
+                pickle.dump({"model": model, "feature_names": panel.feature_names}, f)
+            result.model_path = str(model_path)
+        # 2) grava metadata com model_path já preenchido
+        meta_path = model_dir / "spatial_model_meta.json"
+        meta_path.write_text(
+            json.dumps(asdict(result), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    return model, result
+
+
+def train_from_csv(
+    csv_path: str | Path,
+    target_col: str = "y_loss_3y",
+    model_dir: str | Path = "data/spatial/models",
+    **kwargs,
+) -> SpatialTrainResult:
+    panel = load_panel_csv(csv_path, target_col=target_col)
+    _, result = train_spatial_model(panel, target_col=target_col, model_dir=model_dir, **kwargs)
+    return result
+
+
+def walk_forward_spatial(panel: Panel, seed: int = 42) -> Dict[str, Any]:
+    """
+    Vários anos de corte no painel célula×ano.
+    Cada corte treina só com anos anteriores, compara com a taxa de treino
+    e com uma logística só de distância à estrada, e calibra Platt no ano
+    de validação quando há eventos suficientes.
+    """
+    from ..reliability import apply_platt, expected_calibration_error, fit_platt
+
+    years = sorted({int(y) for y in panel.years})
+    if len(years) < 3:
+        return {"cutoffs": [], "by_cutoff": [], "note": "painel com menos de 3 anos"}
+
+    road_idx = panel.feature_names.index("road_dist_km") if "road_dist_km" in panel.feature_names else None
+    by_cutoff: List[Dict[str, Any]] = []
+    last_calibrator = None
+    for test_year in years[1:]:
+        earlier = [y for y in years if y < test_year]
+        if len(earlier) == 1:
+            train_years = earlier
+            valid_year = None
+        else:
+            valid_year = earlier[-1]
+            train_years = earlier[:-1]
+        if not train_years:
+            continue
+        train_m = np.isin(panel.years, train_years)
+        valid_m = panel.years == valid_year if valid_year is not None else np.zeros(len(panel.years), dtype=bool)
+        test_m = panel.years == test_year
+        if int(train_m.sum()) < 20 or int(test_m.sum()) < 10 or len(np.unique(panel.y[train_m])) < 2:
+            continue
+        X_tr, y_tr = panel.X[train_m], panel.y[train_m]
+        X_te, y_te = panel.X[test_m], panel.y[test_m]
+        X_va = panel.X[valid_m] if valid_m.any() else None
+        y_va = panel.y[valid_m] if valid_m.any() else None
+
+        if HAS_XGB:
+            model, _ = _fit_xgboost(X_tr, y_tr, X_va, y_va, seed=seed)
+        else:
+            model = _fit_sklearn_gbm(X_tr, y_tr, seed=seed)
+        proba_te = model.predict_proba(X_te)[:, 1]
+        proba_va = model.predict_proba(X_va)[:, 1] if X_va is not None and y_va is not None and len(y_va) else None
+
+        prevalence = float(y_tr.mean())
+        metrics = evaluate_binary(y_te, proba_te)
+        metrics_const = evaluate_binary(y_te, np.full_like(proba_te, prevalence))
+        metrics_road: Dict[str, float] = {}
+        if road_idx is not None:
+            road_cal = fit_platt(-X_tr[:, road_idx], y_tr, min_positives=8)
+            if road_cal is not None:
+                metrics_road = evaluate_binary(y_te, apply_platt(-X_te[:, road_idx], road_cal))
+
+        calibrator = None
+        ece_cal = None
+        metrics_cal: Dict[str, float] = {}
+        if proba_va is not None and y_va is not None:
+            calibrator = fit_platt(proba_va, y_va, min_positives=15)
+            if calibrator is not None:
+                last_calibrator = calibrator
+                cal_te = apply_platt(proba_te, calibrator)
+                ece_cal = expected_calibration_error(y_te, cal_te)
+                metrics_cal = evaluate_binary(y_te, cal_te)
+
+        by_cutoff.append(
+            {
+                "test_year": int(test_year),
+                "valid_year": int(valid_year) if valid_year is not None else None,
+                "train_years": [int(y) for y in train_years],
+                "metrics_model": metrics,
+                "metrics_prevalence_baseline": metrics_const,
+                "metrics_road_distance_baseline": metrics_road,
+                "metrics_after_platt": metrics_cal,
+                "ece_raw": expected_calibration_error(y_te, proba_te),
+                "ece_platt": ece_cal,
+                "calibration_fit": calibrator is not None,
+            }
+        )
+
+    aucs = [c["metrics_model"]["roc_auc"] for c in by_cutoff if c["metrics_model"].get("roc_auc") == c["metrics_model"].get("roc_auc")]
+    return {
+        "cutoffs": [c["test_year"] for c in by_cutoff],
+        "by_cutoff": by_cutoff,
+        "n_cutoffs": len(by_cutoff),
+        "median_roc_auc": round(float(np.median(aucs)), 6) if aucs else None,
+        "calibrator_last_validation": last_calibrator,
+        "note": (
+            "Métricas medidas na grade do painel (features observadas em t0). "
+            "Não descrevem um mapa cujas features foram imputadas com a mediana."
+        ),
+    }
+

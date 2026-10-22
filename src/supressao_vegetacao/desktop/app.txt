@@ -1,0 +1,485 @@
+"""
+Módulo de Interface Gráfica Desktop (Tkinter) para Inferência e Diagnóstico de Desmatamento.
+Suporta:
+- Mapa interativo, dinâmico e visualmente rico no Tkinter Canvas com grade regular 10x8 SIRGAS 2000,
+  colorização de risco relativo, contornos e seleção interativa com clique.
+- Botão "Gerar Relatório Técnico em PDF" exatamente idêntico ao padrão oficial de 7 páginas.
+- Seletor de horizontes interativo (3, 5, 8, 10 e 20 Anos).
+- Painel de métricas e síntese espacial em tempo real.
+- Suporte a execução em ambientes headless via Console Fallback com exportação automática de PDF.
+"""
+
+import os
+import sys
+import webbrowser
+from pathlib import Path
+from typing import Optional, Dict, Any
+
+from ..sources.municipality import list_municipalities, get_municipality
+from ..sources.city_resolver import resolve_municipality_code  # v16: résolução movida p/ sources (parecer C3)
+from ..inference.predict import run_city_deforestation_analysis
+from ..settings import SUPPORTED_HORIZONS
+from .pdf_report import generate_technical_report_pdf
+
+
+def get_risk_color(level: str, prob: float) -> str:
+    """v4 — escala do mapa polígono: Baixo(verde) Médio(amarelo) Alto(laranja) Maior(vermelho)."""
+    if prob >= 0.75 or level == "CRITICO":
+        return "#dc2626"  # Maior
+    if prob >= 0.50 or level == "ALTO":
+        return "#f97316"  # Alto
+    if prob >= 0.25 or level == "MODERADO":
+        return "#eab308"  # Médio
+    return "#22c55e"  # Baixo (verde)
+
+
+def run_desktop_app():
+    """Inicia a interface Tkinter interativa com Canvas cartográfico dinâmico e exportador de PDF."""
+    # v16 (parecer C3): imports de GUI movidos para dentro da função — o módulo
+    # permanece importável em servidores headless (a API não depende mais dele,
+    # mas scripts legados ainda o importam).
+    try:
+        import tkinter as tk
+        from tkinter import ttk, messagebox, filedialog
+    except (ImportError, ModuleNotFoundError):
+        print("\n[Aviso] O módulo 'tkinter' não está instalado neste ambiente Linux headless.")
+        print("[Desktop] Iniciando modo interativo via terminal com geração de PDF...\n")
+        _run_terminal_interactive_gui()
+        return
+
+    # Se tkinter existe, tenta criar a janela raiz
+    try:
+        root = tk.Tk()
+    except Exception as e:
+        print(f"\n[Aviso] Servidor gráfico não detectado ($DISPLAY ausente: {e}).")
+        print("[Desktop] Executando em modo interativo de console com geração de PDF...\n")
+        _run_terminal_interactive_gui()
+        return
+
+    root.title("Supressão Vegetal ML — Diagnóstico Territorial & Relatório Técnico PDF")
+    root.geometry("1180x760")
+    root.minsize(980, 640)
+    root.configure(bg="#0b1120")
+
+    style = ttk.Style()
+    style.theme_use("clam")
+    style.configure("TLabel", background="#0b1120", foreground="#f1f5f9")
+    style.configure("TFrame", background="#0b1120")
+    style.configure("TLabelframe", background="#0f172a", foreground="#38bdf8")
+    style.configure("TLabelframe.Label", background="#0f172a", foreground="#38bdf8", font=("Helvetica", 10, "bold"))
+
+    # Estado da aplicação
+    current_res: Dict[str, Any] = {}
+    selected_horizon = tk.StringVar(value="20y")
+    selected_cell_id = tk.StringVar(value="")
+
+    # Barra Superior de Controles e Ações
+    top_bar = tk.Frame(root, bg="#0f172a", padx=16, pady=12, highlightbackground="#1e293b", highlightthickness=1)
+    top_bar.pack(fill="x", side="top")
+
+    tk.Label(top_bar, text="Município / IBGE:", font=("Helvetica", 10, "bold"), bg="#0f172a", fg="#94a3b8").pack(side="left", padx=(0, 6))
+
+    entry_muni = tk.Entry(top_bar, font=("Helvetica", 10), bg="#1e293b", fg="#ffffff", insertbackground="white", width=18, relief="flat", highlightbackground="#334155", highlightthickness=1)
+    entry_muni.insert(0, "MAFRA-SC")
+    entry_muni.pack(side="left", padx=(0, 12))
+
+    tk.Label(top_bar, text="Pressão (%):", font=("Helvetica", 10), bg="#0f172a", fg="#94a3b8").pack(side="left", padx=(0, 4))
+    entry_pressure = tk.Entry(top_bar, font=("Helvetica", 10), bg="#1e293b", fg="#ffffff", insertbackground="white", width=6, relief="flat", highlightbackground="#334155", highlightthickness=1)
+    entry_pressure.insert(0, "100")
+    entry_pressure.pack(side="left", padx=(0, 12))
+
+    # Botão Consultar
+    btn_calc = tk.Button(
+        top_bar, text="🔍 Consultar Análise", font=("Helvetica", 10, "bold"),
+        bg="#0284c7", fg="#ffffff", activebackground="#0369a1", activeforeground="#ffffff",
+        padx=12, pady=4, relief="flat", cursor="hand2", command=lambda: process_query()
+    )
+    btn_calc.pack(side="left", padx=(0, 16))
+
+    # Seletor de Horizontes
+    tk.Label(top_bar, text="Horizonte:", font=("Helvetica", 10, "bold"), bg="#0f172a", fg="#94a3b8").pack(side="left", padx=(8, 6))
+    for h in ["3y", "5y", "8y", "10y", "20y"]:
+        rb = tk.Radiobutton(
+            top_bar, text=f"{h[:-1]} Anos", variable=selected_horizon, value=h,
+            bg="#0f172a", fg="#e2e8f0", selectcolor="#0369a1", activebackground="#0f172a",
+            activeforeground="#38bdf8", font=("Helvetica", 9, "bold"), command=lambda: update_map_view()
+        )
+        rb.pack(side="left", padx=4)
+
+    # Botão de Gerar PDF Oficial (Destaque Verde Esmeralda)
+    btn_pdf = tk.Button(
+        top_bar, text="📄 Gerar Relatório Técnico em PDF", font=("Helvetica", 10, "bold"),
+        bg="#10b981", fg="#022c22", activebackground="#34d399", activeforeground="#022c22",
+        padx=14, pady=5, relief="flat", cursor="hand2", command=lambda: export_pdf_action()
+    )
+    btn_pdf.pack(side="right", padx=(10, 0))
+
+    # Layout Principal: Esquerda (Mapa Interativo Canvas) | Direita (Indicadores e Detalhes)
+    main_container = tk.Frame(root, bg="#0b1120", padx=12, pady=10)
+    main_container.pack(fill="both", expand=True)
+
+    # Painel Esquerdo: Canvas do Mapa Dinâmico
+    map_frame = tk.LabelFrame(main_container, text=" Malha Territorial Cartográfica e Risco Espacial (SIRGAS 2000) ", bg="#0f172a", fg="#38bdf8", font=("Helvetica", 10, "bold"), padx=8, pady=8)
+    map_frame.pack(side="left", fill="both", expand=True, padx=(0, 8))
+
+    canvas = tk.Canvas(map_frame, bg="#020617", highlightthickness=0)
+    canvas.pack(fill="both", expand=True)
+
+    # Painel Direito: Indicadores, Célula Selecionada e Ranking
+    side_frame = tk.Frame(main_container, bg="#0f172a", width=380, padx=12, pady=10, highlightbackground="#1e293b", highlightthickness=1)
+    side_frame.pack(side="right", fill="y", padx=(4, 0))
+    side_frame.pack_propagate(False)
+
+    lbl_muni_title = tk.Label(side_frame, text="Carregando...", font=("Helvetica", 13, "bold"), bg="#0f172a", fg="#ffffff", anchor="w")
+    lbl_muni_title.pack(fill="x", pady=(0, 4))
+
+    lbl_muni_sub = tk.Label(side_frame, text="Aguardando consulta...", font=("Helvetica", 9), bg="#0f172a", fg="#94a3b8", anchor="w")
+    lbl_muni_sub.pack(fill="x", pady=(0, 10))
+
+    # Cartões de KPIs
+    kpi_frame = tk.Frame(side_frame, bg="#0f172a")
+    kpi_frame.pack(fill="x", pady=(0, 10))
+
+    lbl_kpi_risk = tk.Label(kpi_frame, text="Prob. Média: --", font=("Helvetica", 10, "bold"), bg="#1e293b", fg="#fbbf24", padx=8, pady=6, anchor="w")
+    lbl_kpi_risk.pack(fill="x", pady=2)
+
+    lbl_kpi_loss = tk.Label(kpi_frame, text="Perda Est.: --", font=("Helvetica", 10, "bold"), bg="#1e293b", fg="#f87171", padx=8, pady=6, anchor="w")
+    lbl_kpi_loss.pack(fill="x", pady=2)
+
+    lbl_kpi_crit = tk.Label(kpi_frame, text="Células Críticas: --", font=("Helvetica", 10, "bold"), bg="#1e293b", fg="#ef4444", padx=8, pady=6, anchor="w")
+    lbl_kpi_crit.pack(fill="x", pady=2)
+
+    # Detalhes da Célula Inspecionada
+    tk.Label(side_frame, text="CÉLULA INSPECIONADA:", font=("Helvetica", 9, "bold"), bg="#0f172a", fg="#38bdf8", anchor="w").pack(fill="x", pady=(10, 2))
+    cell_info_txt = tk.Text(side_frame, height=7, bg="#020617", fg="#f1f5f9", font=("Courier", 8), relief="flat", padx=6, pady=6)
+    cell_info_txt.pack(fill="x", pady=(0, 6))
+
+    #btn_gmaps = tk.Button(
+    #    side_frame, text="📍 Abrir no Google Maps (Navegador)", font=("Helvetica", 9, "bold"),
+    #    bg="#0284c7", fg="#ffffff", activebackground="#38bdf8", activeforeground="#0f172a",
+    #    padx=8, pady=4, relief="flat", cursor="hand2", command=lambda: open_in_google_maps()
+    #)
+
+    btn_gmaps = tk.Button(
+        side_frame, text="📍 Abrir no Google Maps (Navegador)", font=("Helvetica", 9, "bold"),
+        bg="#0284c7", fg="#ffffff", activebackground="#38bdf8", activeforeground="#0f172a",
+        padx=8, pady=4, relief="flat", cursor="hand2", command=lambda: open_in_google_maps()
+    )
+
+    btn_gmaps.pack(fill="x", pady=(0, 10))
+
+    # Top Hotspots
+    tk.Label(side_frame, text="TOP 5 PONTOS DE ATENÇÃO:", font=("Helvetica", 9, "bold"), bg="#0f172a", fg="#38bdf8", anchor="w").pack(fill="x", pady=(4, 2))
+    hotspots_txt = tk.Text(side_frame, height=10, bg="#020617", fg="#cbd5e1", font=("Courier", 8), relief="flat", padx=6, pady=6)
+    hotspots_txt.pack(fill="both", expand=True)
+
+    def process_query():
+        nonlocal current_res
+        raw_muni = entry_muni.get().strip() or "MAFRA-SC"
+        try:
+            ibge = resolve_municipality_code(raw_muni)
+        except ValueError as err:
+            messagebox.showerror("Município", str(err))
+            return
+        try:
+            pressure = float(entry_pressure.get().strip() or 100) / 100.0
+        except ValueError:
+            pressure = 1.0
+
+        current_res = run_city_deforestation_analysis(ibge, [3, 5, 8, 10, 20], custom_pressure_multiplier=pressure)
+        m = current_res["municipality"]
+        lbl_muni_title.config(text=f"{m['name']} - {m['uf']}")
+        lbl_muni_sub.config(text=f"IBGE: {m['ibge_code']} | Remanescente: {m['forest_remnant_ha']:,.0f} ha")
+        update_map_view()
+
+    def update_map_view():
+        if not current_res:
+            return
+        h = selected_horizon.get()
+        summary = current_res["horizon_summaries"].get(h, {})
+        cells = current_res.get("cells", [])
+
+        # Atualiza KPIs
+        lbl_kpi_risk.config(text=f"Prob. Média: {summary.get('mean_probability', 0)*100:.1f}% (Pico: {summary.get('max_probability', 0)*100:.1f}%)")
+        lbl_kpi_loss.config(text=f"Perda Projetada: {summary.get('expected_suppressed_area_ha', 0):,.1f} ha ({summary.get('percent_of_remnant_lost', 0):.2f}%)")
+        lbl_kpi_crit.config(text=f"Células Críticas (P≥72%): {summary.get('critical_points_count', 0)} ({summary.get('high_points_count', 0)} em risco alto)")
+
+        # Atualiza Top Hotspots
+        hotspots_txt.delete("1.0", tk.END)
+        for pt in summary.get("top_attention_points", [])[:5]:
+            hotspots_txt.insert(
+                tk.END,
+                f"#{pt['rank']} {pt['locality']}\n"
+                f"   Risco: {pt['probability']*100:.1f}% [{pt['attention_level']}]\n"
+                f"   Perda: {pt['expected_suppressed_ha']} ha | {pt['dominant_driver']}\n\n"
+            )
+
+        # Redesenha Canvas — cidade inteira em quadrados, cabendo na área visível
+        canvas.delete("all")
+        cw = max(canvas.winfo_width() or 640, 320)
+        ch = max(canvas.winfo_height() or 540, 280)
+
+        inside = [c for c in cells if c.get("is_inside_boundary", True)]
+        if not inside:
+            canvas.create_text(cw/2, ch/2, text="Sem células no polígono", fill="#94a3b8")
+            return
+
+        min_r = min(c.get("row", 0) for c in inside)
+        max_r = max(c.get("row", 0) for c in inside)
+        min_c = min(c.get("col", 0) for c in inside)
+        max_c = max(c.get("col", 0) for c in inside)
+        n_r = max_r - min_r + 1
+        n_c = max_c - min_c + 1
+
+        margin_x = 16
+        margin_top = 12
+        margin_bottom = 36  # espaço da legenda
+        avail_w = cw - 2 * margin_x
+        avail_h = ch - margin_top - margin_bottom
+        # células quadradas que cabem inteiras na tela
+        side = min(avail_w / n_c, avail_h / n_r)
+        grid_w = side * n_c
+        grid_h = side * n_r
+        origin_x = margin_x + (avail_w - grid_w) / 2
+        origin_y = margin_top + (avail_h - grid_h) / 2
+        gap = max(1.0, side * 0.04)
+
+        font_size = max(6, min(11, int(side * 0.22)))
+        font_id = max(5, min(8, int(side * 0.14)))
+
+        for c in inside:
+            sc = c.get("scenarios", {}).get(h, {})
+            prob = sc.get("probability", 0.0)
+            level = sc.get("attention_level", "BAIXO")
+            col = c.get("col", 0)
+            row = c.get("row", 0)
+            x1 = origin_x + (col - min_c) * side + gap / 2
+            y1 = origin_y + (max_r - row) * side + gap / 2
+            x2 = x1 + side - gap
+            y2 = y1 + side - gap
+
+            color = get_risk_color(level, prob)
+            tag_name = f"cell_{c['cell_id']}"
+
+            outline_col = "#38bdf8" if selected_cell_id.get() == c["cell_id"] else "#334155"
+            outline_w = 2.5 if selected_cell_id.get() == c["cell_id"] else 1
+            canvas.create_rectangle(
+                x1, y1, x2, y2, fill=color, outline=outline_col, width=outline_w, tags=(tag_name, "cell")
+            )
+
+            text_color = "#0f172a" if color in ("#eab308", "#fef08a", "#22c55e") else "#f8fafc"
+            # Malha densa v4: só mostra % se a célula for grande o bastante
+            if side >= 22:
+                canvas.create_text(
+                    (x1 + x2) / 2, (y1 + y2) / 2,
+                    text=f"{prob*100:.0f}%", fill=text_color,
+                    font=("Helvetica", font_size, "bold"), tags=(tag_name, "cell_text"),
+                )
+
+            def make_handler(cid):
+                return lambda event: inspect_cell(cid)
+            canvas.tag_bind(tag_name, "<Button-1>", make_handler(c["cell_id"]))
+
+        # Rosa dos ventos (N)
+        nx, ny = 28, 36
+        canvas.create_line(nx, ny + 18, nx, ny - 14, fill="#e2e8f0", width=2, arrow="last")
+        canvas.create_text(nx, ny - 22, text="N", fill="#e2e8f0", font=("Helvetica", 10, "bold"))
+
+        # Legenda compacta
+        leg_y = ch - 16
+        lx = margin_x
+        canvas.create_text(lx + 50, leg_y, text="Escala:", fill="#94a3b8", font=("Helvetica", 8, "bold"))
+        items = [
+            ("#22c55e", "Baixo", "#86efac"),
+            ("#eab308", "Médio", "#fde68a"),
+            ("#f97316", "Alto", "#fdba74"),
+            ("#dc2626", "Maior", "#fca5a5"),
+        ]
+        x = lx + 90
+        for fill, label, tcol in items:
+            canvas.create_rectangle(x, leg_y - 6, x + 12, leg_y + 6, fill=fill, outline="")
+            canvas.create_text(x + 40, leg_y, text=label, fill=tcol, font=("Helvetica", 8, "bold"))
+            x += 90
+
+    def _cell_google_maps_url(cell: dict) -> str:
+        """
+        Abre o Google Maps com o retângulo da célula desenhado (rota fechada azul)
+        usando os 4 cantos do bbox da grade.
+        bbox da célula: [min_lat, min_lon, max_lat, max_lon]
+        """
+        lat, lon = cell["centroid"]
+        bb = cell.get("bbox")
+        if bb and len(bb) >= 4:
+            min_lat, min_lon, max_lat, max_lon = float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])
+            # 4 cantos + fecha o polígono (Google desenha a linha em azul)
+            corners = [
+                (min_lat, min_lon),
+                (min_lat, max_lon),
+                (max_lat, max_lon),
+                (max_lat, min_lon),
+                (min_lat, min_lon),
+            ]
+            path = "/".join(f"{a:.6f},{b:.6f}" for a, b in corners)
+            # zoom ~17 para enquadrar uma célula ~1km
+            return (
+                f"https://www.google.com/maps/dir/{path}"
+                f"/@{lat:.6f},{lon:.6f},17z/data=!3m1!4b1!4m2!4m1!3e2"
+            )
+        return f"https://www.google.com/maps/@{lat},{lon},17z"
+
+    def open_in_google_maps():
+        cid = selected_cell_id.get()
+        if not cid or not current_res:
+            messagebox.showinfo("Google Maps", "Por favor, clique em um quadrado no mapa para inspecionar.")
+            return
+        cell = next((c for c in current_res.get("cells", []) if c["cell_id"] == cid), None)
+        if not cell:
+            return
+        #gmaps_url = _cell_google_maps_url(cell)
+
+        # Substitua por:
+        abrir_mapa_satelite_embutido(cell)
+        #try:
+        #    webbrowser.open(gmaps_url)
+        #except Exception as e:
+        #    messagebox.showerror("Erro ao Abrir Navegador", f"Não foi possível abrir o navegador: {e}")
+
+    def inspect_cell(cell_id: str):
+        selected_cell_id.set(cell_id)
+        update_map_view()
+        cell = next((c for c in current_res.get("cells", []) if c["cell_id"] == cell_id), None)
+        if not cell:
+            return
+        h = selected_horizon.get()
+        sc = cell.get("scenarios", {}).get(h, {})
+        lat, lon = cell["centroid"]
+        cell_info_txt.delete("1.0", tk.END)
+        cell_info_txt.insert(
+            tk.END,
+            f"ID: {cell['cell_id']} ({cell['locality']})\n"
+            f"Coordenadas: {lat:.4f}°, {lon:.4f}°\n"
+            f"Risco ({h}): {sc.get('probability', 0)*100:.1f}% [{sc.get('attention_level', 'BAIXO')}]\n"
+            f"Supressão Estimada: {sc.get('expected_suppressed_ha', 0):.2f} ha\n"
+            f"Dist. Rodovias: {cell.get('dist_road_km', 0):.1f} km\n"
+            f"Cobertura Florestal: {cell.get('initial_forest_ha', 0):.1f} ha"
+        )
+
+    def export_pdf_action():
+        if not current_res:
+            messagebox.showwarning("Aviso", "Por favor, realize uma consulta antes de gerar o relatório em PDF.")
+            return
+
+        m = current_res["municipality"]
+        default_filename = f"Relatorio_Supressao_Vegetal_{m['ibge_code']}_{m['name']}.pdf"
+
+        try:
+            out_file = filedialog.asksaveasfilename(
+                title="Salvar Relatório Técnico Oficial em PDF",
+                initialfile=default_filename,
+                defaultextension=".pdf",
+                filetypes=[("Arquivos PDF (*.pdf)", "*.pdf"), ("Todos os Arquivos", "*.*")]
+            )
+        except Exception:
+            out_file = default_filename
+
+        if not out_file:
+            return
+
+        try:
+            generate_technical_report_pdf(current_res, out_file)
+            messagebox.showinfo(
+                "PDF Gerado com Sucesso",
+                f"O Relatório Técnico de 7 páginas foi gerado com sucesso!\n\nSalvo em:\n{out_file}"
+            )
+        except Exception as err:
+            messagebox.showerror("Erro ao Gerar PDF", f"Falha na compilação do relatório: {err}")
+
+    # Bind de redimensionamento do canvas
+    canvas.bind("<Configure>", lambda e: update_map_view())
+
+    # Inicializa com a cidade padrão
+    root.after(100, process_query)
+    root.mainloop()
+
+def abrir_mapa_satelite_embutido(cell: dict):
+    """
+    Abre uma nova janela pop-up interna com o mapa de satélite do Google
+    e desenha o polígono vermelho (BBox) ao redor da célula degradada.
+    """
+    # v16 (parecer C3): imports de GUI locais — o módulo continua importável sem display
+    import tkinter as tk
+    import tkintermapview
+
+    lat, lon = cell["centroid"]
+    bb = cell.get("bbox")
+    
+    # 1. Criar uma nova janela flutuante (Toplevel)
+    janela_mapa = tk.Toplevel()
+    janela_mapa.title(f"Alerta de Desmatamento - Centro: {lat:.6f}, {lon:.6f}")
+    janela_mapa.geometry("800x600")
+    janela_mapa.grab_set()  # Foca a atenção do usuário nesta janela
+    
+    # 2. Criar o widget de mapas dentro da nova janela
+    mapa = tkintermapview.TkinterMapView(janela_mapa, width=800, height=600, corner_radius=0)
+    mapa.pack(fill="both", expand=True)
+    
+    # 3. CONFIGURAÇÃO CHAVE: Usar o servidor oficial de Satélite do Google (sem precisar de chaves API!)
+    mapa.set_tile_server("https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", max_zoom=22)
+    
+    # 4. Centralizar o mapa no centroide com zoom de 17x (ideal para células de 1km)
+    mapa.set_position(lat, lon)
+    mapa.set_zoom(17)
+    
+    # 5. Adicionar um marcador (pin) vermelho no centro
+    mapa.set_marker(lat, lon, text="Centro do Alerta")
+    
+    # 6. Desenhar o quadrado vermelho (BBox)
+    if bb and len(bb) >= 4:
+        min_lat, min_lon, max_lat, max_lon = float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])
+        
+        # Define os 4 cantos do quadrado
+        coordenadas_quadrado = [
+            (min_lat, min_lon),
+            (min_lat, max_lon),
+            (max_lat, max_lon),
+            (max_lat, min_lon),
+            (min_lat, min_lon) # Fecha o polígono voltando ao início
+        ]
+        
+        # Desenha o quadrado vermelho translúcido na tela
+        mapa.set_polygon(
+            coordenadas_quadrado,
+            fill_color=None,            # Mantém o interior transparente para ver a floresta embaixo
+            outline_color="#EF4444",    # Borda vermelha vibrante
+            border_width=3,
+            name="bbox_alerta"
+        )
+
+def _run_terminal_interactive_gui():
+    print("=" * 78)
+    print("APLICAÇÃO DESKTOP SUPRESSÃO VEGETAL ML — CONSOLE FALLBACK COM PDF")
+    print("Horizontes: 3, 5, 8 e 10 Anos | Grade Regular SIRGAS 2000")
+    print("=" * 78)
+
+    muni_input = "MAFRA-SC"
+    ibge = resolve_municipality_code(muni_input)
+    res = run_city_deforestation_analysis(ibge_code=ibge, horizons=[3, 5, 8, 10])
+    m = res["municipality"]
+
+    print(f"\n[Consulta Oficial: {muni_input} -> {m['name']}/{m['uf']} (IBGE {m['ibge_code']})]")
+    print(f"Bioma: {m['biome']} | Remanescente PRODES: {m['forest_remnant_ha']:,.1f} ha\n")
+
+    for h in [3, 5, 8, 10]:
+        h_key = f"{h}y"
+        s = res["horizon_summaries"][h_key]
+        print(f"► Cenário {h} Anos ({s['target_year']}):")
+        print(f"   Risco Médio: {s['mean_probability']*100:.1f}% | Críticos: {s['critical_points_count']} | Perda: {s['expected_suppressed_area_ha']:.1f} ha ({s['percent_of_remnant_lost']:.2f}%)")
+        top1 = s["top_attention_points"][0]
+        print(f"   Hotspot #1: {top1['locality']} ({top1['probability']*100:.1f}% risco - {top1['dominant_driver']})\n")
+
+    # Gera PDF automaticamente no console fallback
+    pdf_out = f"Relatorio_Tecnico_Oficial_{ibge}_{m['name']}.pdf"
+    generate_technical_report_pdf(res, pdf_out)
+    print(f"🎉 Relatório Técnico em PDF (7 páginas oficiais) gerado com sucesso:")
+    print(f"   Arquivo: {os.path.abspath(pdf_out)} ({os.path.getsize(pdf_out):,} bytes)")
+    print("=" * 78)
