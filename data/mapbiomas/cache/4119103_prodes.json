@@ -1,0 +1,18 @@
+{
+  "ibge_code": "4119103",
+  "source": "TerraBrasilis/INPE PRODES WFS yearly_deforestation (centroid ∈ polígono IBGE)",
+  "historic_prodes_deforestation_ha": {
+    "2018": 61.61,
+    "2019": 15.62,
+    "2020": 21.98,
+    "2021": 35.84,
+    "2022": 85.99,
+    "2023": 28.33,
+    "2024": 8.28
+  },
+  "n_polygons": 113,
+  "layers_used": [
+    "prodes-mata-atlantica-nb:yearly_deforestation"
+  ],
+  "note": "Áreas oficiais de desmate anual (PRODES biomas via TerraBrasilis). Atribuição municipal por centroide do polígono de desmate dentro da malha IBGE."
+}

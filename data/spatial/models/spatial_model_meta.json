@@ -1,0 +1,219 @@
+{
+  "model_type": "XGBoostClassifier",
+  "feature_names": [
+    "slope_deg",
+    "elev_m",
+    "forest_neighbor_frac",
+    "built_surface",
+    "road_dist_km",
+    "years_stable_forest"
+  ],
+  "target_col": "y_loss_3y",
+  "metrics_test": {
+    "n": 542,
+    "positive_rate": 0.038745,
+    "roc_auc": 0.759803,
+    "pr_auc": 0.633916,
+    "brier": 0.020015,
+    "recall_at_top10pct": 0.619048
+  },
+  "metrics_valid": {
+    "n": 548,
+    "positive_rate": 0.047445,
+    "roc_auc": 0.875037,
+    "pr_auc": 0.844417,
+    "brier": 0.01292,
+    "recall_at_top10pct": 0.846154
+  },
+  "train_years": [
+    2017,
+    2018
+  ],
+  "valid_year": 2019,
+  "test_year": 2020,
+  "n_train": 1115,
+  "n_valid": 548,
+  "n_test": 542,
+  "positive_rate_test": 0.03874538745387454,
+  "feature_importance": [
+    {
+      "feature": "built_surface",
+      "importance": 0.200888
+    },
+    {
+      "feature": "elev_m",
+      "importance": 0.175157
+    },
+    {
+      "feature": "slope_deg",
+      "importance": 0.171919
+    },
+    {
+      "feature": "road_dist_km",
+      "importance": 0.162628
+    },
+    {
+      "feature": "forest_neighbor_frac",
+      "importance": 0.147444
+    },
+    {
+      "feature": "years_stable_forest",
+      "importance": 0.141963
+    }
+  ],
+  "model_path": "C:\\Users\\julio\\OneDrive\\Desktop\\forestguard-ai-v6\\data\\spatial\\models\\4210100\\spatial_model.json",
+  "feature_medians": {
+    "slope_deg": 1.1324881,
+    "elev_m": 845.0,
+    "forest_neighbor_frac": 0.4444444444444444,
+    "built_surface": 0.0,
+    "road_dist_km": 1.47648230602334,
+    "years_stable_forest": 6.0
+  },
+  "training_note": "Modelo espacial do município 4210100 treinado em painel GEE/MapBiomas real (C:\\Users\\julio\\OneDrive\\Desktop\\forestguard-ai-v6\\data\\spatial\\panels\\4210100). Split temporal; features em t0 apenas.",
+  "ibge_code": "4210100",
+  "model_class": "city_specific_spatial_gee",
+  "data_source": "gee_mapbiomas_panel",
+  "panel_path": "C:\\Users\\julio\\OneDrive\\Desktop\\forestguard-ai-v6\\data\\spatial\\panels\\4210100",
+  "mean_loss_rate_used": 0.009066999999999999,
+  "walk_forward": {
+    "cutoffs": [
+      2018,
+      2019,
+      2020
+    ],
+    "by_cutoff": [
+      {
+        "test_year": 2018,
+        "valid_year": null,
+        "train_years": [
+          2017
+        ],
+        "metrics_model": {
+          "n": 556,
+          "positive_rate": 0.059353,
+          "roc_auc": 0.873052,
+          "pr_auc": 0.704404,
+          "brier": 0.023892,
+          "recall_at_top10pct": 0.636364
+        },
+        "metrics_prevalence_baseline": {
+          "n": 556,
+          "positive_rate": 0.059353,
+          "roc_auc": 0.5,
+          "pr_auc": 0.059353,
+          "brier": 0.055862,
+          "recall_at_top10pct": 0.060606
+        },
+        "metrics_road_distance_baseline": {
+          "n": 556,
+          "positive_rate": 0.059353,
+          "roc_auc": 0.590098,
+          "pr_auc": 0.116485,
+          "brier": 0.055339,
+          "recall_at_top10pct": 0.212121
+        },
+        "metrics_after_platt": {},
+        "ece_raw": 0.019792,
+        "ece_platt": null,
+        "calibration_fit": false
+      },
+      {
+        "test_year": 2019,
+        "valid_year": 2018,
+        "train_years": [
+          2017
+        ],
+        "metrics_model": {
+          "n": 548,
+          "positive_rate": 0.047445,
+          "roc_auc": 0.716844,
+          "pr_auc": 0.423426,
+          "brier": 0.036544,
+          "recall_at_top10pct": 0.461538
+        },
+        "metrics_prevalence_baseline": {
+          "n": 548,
+          "positive_rate": 0.047445,
+          "roc_auc": 0.5,
+          "pr_auc": 0.047445,
+          "brier": 0.045233,
+          "recall_at_top10pct": 0.038462
+        },
+        "metrics_road_distance_baseline": {
+          "n": 548,
+          "positive_rate": 0.047445,
+          "roc_auc": 0.603264,
+          "pr_auc": 0.108432,
+          "brier": 0.044716,
+          "recall_at_top10pct": 0.269231
+        },
+        "metrics_after_platt": {
+          "n": 548,
+          "positive_rate": 0.047445,
+          "roc_auc": 0.716844,
+          "pr_auc": 0.423426,
+          "brier": 0.033501,
+          "recall_at_top10pct": 0.461538
+        },
+        "ece_raw": 0.022792,
+        "ece_platt": 0.01495,
+        "calibration_fit": true
+      },
+      {
+        "test_year": 2020,
+        "valid_year": 2019,
+        "train_years": [
+          2017,
+          2018
+        ],
+        "metrics_model": {
+          "n": 542,
+          "positive_rate": 0.038745,
+          "roc_auc": 0.747189,
+          "pr_auc": 0.63138,
+          "brier": 0.038039,
+          "recall_at_top10pct": 0.619048
+        },
+        "metrics_prevalence_baseline": {
+          "n": 542,
+          "positive_rate": 0.038745,
+          "roc_auc": 0.5,
+          "pr_auc": 0.038745,
+          "brier": 0.037559,
+          "recall_at_top10pct": 0.047619
+        },
+        "metrics_road_distance_baseline": {
+          "n": 542,
+          "positive_rate": 0.038745,
+          "roc_auc": 0.530482,
+          "pr_auc": 0.056189,
+          "brier": 0.037652,
+          "recall_at_top10pct": 0.142857
+        },
+        "metrics_after_platt": {
+          "n": 542,
+          "positive_rate": 0.038745,
+          "roc_auc": 0.747189,
+          "pr_auc": 0.63138,
+          "brier": 0.019265,
+          "recall_at_top10pct": 0.619048
+        },
+        "ece_raw": 0.092315,
+        "ece_platt": 0.017765,
+        "calibration_fit": true
+      }
+    ],
+    "n_cutoffs": 3,
+    "median_roc_auc": 0.747189,
+    "note": "Métricas medidas na grade do painel (features observadas em t0). Não descrevem um mapa cujas features foram imputadas com a mediana."
+  },
+  "calibrator": {
+    "method": "platt",
+    "a": -5.135197,
+    "b": 10.409113,
+    "n": 548,
+    "positives": 26
+  },
+  "calibration_note": "Platt ajustado nas probabilidades do modelo salvo no ano de validação. Não é aplicado no mapa quando features são imputadas."
+}

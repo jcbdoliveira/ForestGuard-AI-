@@ -1,0 +1,17 @@
+{
+  "_source": "TerraBrasilis/INPE PRODES WFS yearly_deforestation (centroid ∈ polígono IBGE)",
+  "_ibge_code": "4210100",
+  "_municipio": "Mafra-SC",
+  "_n_polygons": 383,
+  "_layers": [
+    "prodes-mata-atlantica-nb:yearly_deforestation"
+  ],
+  "_note": "Áreas oficiais de desmate anual (PRODES biomas via TerraBrasilis). Atribuição municipal por centroide do polígono de desmate dentro da malha IBGE.",
+  "2018": 168.78,
+  "2019": 230.96,
+  "2020": 78.58,
+  "2021": 133.7,
+  "2022": 126.48,
+  "2023": 94.5,
+  "2024": 17.67
+}
