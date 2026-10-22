@@ -212,7 +212,7 @@ O desktop requer um ambiente com suporte a interface gráfica. Em ambientes Linu
 
 <p align="center">
   <picture>
-    <img alt="Desktop em tKinter" src="public/tkinter.jpg" width="600" heigt="600>
+    <img alt="Desktop em tKinter" src="public/tkinter.jpg" width="600">
   </picture>
 </p>
 
