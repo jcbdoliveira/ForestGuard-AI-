@@ -102,6 +102,41 @@ src/supressao_vegetacao/api/
 
 ---
 
+## Fontes e extração de dados
+
+O projeto usa três fluxos distintos. MapBiomas e PRODES alimentam séries municipais de cobertura/perda florestal; o notebook do Google Earth Engine (GEE) gera painéis anuais por célula para treinar o modelo espacial. O notebook GEE usa MapBiomas como uma de suas fontes, mas não consulta PRODES.
+
+### MapBiomas: série municipal agregada
+
+O catálogo local é construído a partir da planilha MapBiomas Coleção 11 `MAPBIOMAS_BRAZIL-COL.11-BIOME_STATE_MUNICIPALITY.xlsx`, que deve estar em `data/mapbiomas/`. O código não baixa essa planilha automaticamente.
+
+A rotina `rebuild_index_from_xlsx()` soma, por código IBGE, as linhas da classe `1. Forest` para os anos disponíveis de 2015 a 2024. A diferença positiva entre anos consecutivos é registrada como perda anual aproximada; o último valor da série é usado como remanescente. O índice resultante fica em `data/mapbiomas/forest_by_municipality.json` e é lido pelo catálogo em tempo de execução. Essa série é uma agregação da planilha, não uma extração de pixels feita pelo aplicativo.
+
+>https://brasil.mapbiomas.org/downloads/estatisticas/
+
+### PRODES: consulta ao TerraBrasilis/INPE
+
+Para obter a série PRODES por município, `scripts/add_city.py` consulta as camadas WFS `yearly_deforestation` do TerraBrasilis/INPE para os biomas atendidos pelo código (Mata Atlântica, Amazônia Legal, Cerrado e Pantanal). A consulta usa a caixa envolvente da malha municipal IBGE e pagina os resultados; depois, seleciona os polígonos cujo centroide cai dentro do limite municipal, converte `area_km` para hectares e soma por ano. Por isso, a atribuição municipal é feita pelo centroide — não pelo recorte/interseção exata da geometria na divisa.
+
+Ao adicionar um município, o script salva a malha em `data/boundaries/{ibge}.geojson`, gera por padrão a série de 2018 a 2024 e grava os resultados em `data/prodes_{municipio}_{uf}.json` e no cache `data/mapbiomas/cache/{ibge}_prodes.json`. Se não houver valor de remanescente informado, o código também pode estimá-lo pelas camadas PRODES `residual`, aplicando a mesma regra de centroide.
+
+```bash
+python scripts/add_city.py NOME-UF
+```
+
+
+### Google Earth Engine: painéis espaciais por célula
+
+O processo está em [`scripts/gee/export_municipality_panel.ipynb`](scripts/gee/export_municipality_panel.ipynb) e foi preparado para execução no Google Colab. O notebook autentica e inicializa a API do Earth Engine, obtém a geometria municipal via `geobr`/IBGE e cria uma grade de células de 1 km no CRS `EPSG:32722`. A configuração atual seleciona Mafra (`4210100`) e os anos de 2000 a 2020.
+
+Para cada ano, o notebook lê a banda anual de classificação do asset MapBiomas Coleção 9, considera floresta as classes `3`, `4`, `5`, `6` e `49` e agrega a fração de floresta por célula. Também deriva atributos estáticos de elevação e declividade do SRTM e, quando válido para o ano, superfície construída do GHSL. O rótulo anual de perda é construído comparando a fração florestal entre anos consecutivos, sujeito ao limite mínimo de pixels válidos configurado no notebook. Esses painéis não são séries PRODES.
+
+O notebook exporta uma tabela CSV por município e ano para a pasta `ForestGuard_Panels_v22` no Google Drive. É necessário usar uma conta/projeto com acesso ao Earth Engine, autenticar, aguardar a conclusão das tarefas de exportação e executar as etapas de validação e empacotamento do próprio notebook antes de usar os arquivos em `data/spatial/panels/{ibge}/` para treinamento.
+
+> Atenção à versão da fonte: o notebook GEE usa MapBiomas Coleção 9 para formar os painéis; o índice municipal local descrito acima usa a planilha da Coleção 11.
+
+---
+
 ## Instalação e execução
 
 ### 1) Criar o ambiente virtual
@@ -161,11 +196,25 @@ Endpoints úteis:
 
 No startup, o modelo e as análises dos horizontes 1–20 podem ser pré-carregados em memória, dependendo dos artefatos disponíveis.
 
-### 5) Interface desktop (opcional)
+### 5) Interface desktop
+
+O script `scripts/run_desktop.py` inicia a interface gráfica local do ForestGuard AI. Ele adiciona automaticamente a pasta `src` ao caminho de importação do Python; por isso, não é necessário configurar `PYTHONPATH` para iniciar o desktop. A API também não precisa estar em execução.
+
+Com o ambiente virtual ativado e as dependências instaladas, execute o comando a partir da raiz do repositório:
 
 ```bash
 python scripts/run_desktop.py
 ```
+
+Por padrão, a aplicação abre a análise de Mafra/SC (`4210100`) para o alvo anual `y_loss_1y`. Informe o nome ou o código IBGE de um município e clique em **Consultar Análise** para gerar a visualização. A interface permite explorar o mapa e as métricas por horizonte, alternar entre risco espacial e perda projetada e exportar um relatório técnico em PDF.
+
+O desktop requer um ambiente com suporte a interface gráfica. Em ambientes Linux sem Tkinter ou sem servidor gráfico, o aplicativo tenta iniciar um modo interativo pelo terminal, que também permite gerar o relatório em PDF.
+
+<p align="center">
+  <picture>
+    <img alt="Desktop em tKinter" src="public/tkinter.jpg" width="600" heigt="600>
+  </picture>
+</p>
 
 ---
 
@@ -254,31 +303,45 @@ O arquivo `.env.example` pode servir como base para configurações locais.
 
 ```text
 .
+├── .env.example
+├── .gitignore
 ├── README.md
 ├── VERSION
 ├── requirements.txt
-├── .env.example
+├── assets/                         # Logos adicionais
+├── public/                         # Logos e materiais visuais do projeto
 ├── data/
+│   ├── api_artifacts/4210100/      # Relatórios e resultados da API
+│   ├── boundaries/                 # Limites municipais em GeoJSON
+│   ├── mapbiomas/
+│   │   ├── cache/                  # Séries PRODES em cache por município
+│   │   ├── forest_by_municipality.json
+│   │   └── MAPBIOMAS_BRAZIL-COL.11-BIOME_STATE_MUNICIPALITY.xlsx
+│   ├── roads/                      # Malha viária municipal
 │   ├── spatial/
-│   │   ├── panels/4210100/
-│   │   └── models/4210100_annual/
-│   └── boundaries/
-├── public/
-│   ├── logo_sctecB.png
-│   ├── logo_sctecW.png
-│   └── quadrinhos.jpg
+│   │   ├── models/                 # Modelos e metadados treinados
+│   │   └── panels/                 # Painéis anuais por município
+│   └── prodes_mafra_sc.json        # Série PRODES de referência
 ├── scripts/
+│   ├── gee/
+│   │   └── export_municipality_panel.ipynb
+│   ├── add_city.py
 │   ├── run_api.py
 │   ├── run_desktop.py
+│   ├── train_all_city_models.py
 │   ├── train_spatial.py
-│   └── ...
-└── src/supressao_vegetacao/
-    ├── api/
-    ├── desktop/
-    ├── inference/
-    ├── spatial/
-    ├── reporting/
-    └── ...
+│   └── verify_annual.py
+└── src/
+    └── supressao_vegetacao/
+        ├── api/                    # API FastAPI, rotas, serviços e cache
+        ├── desktop/                # Interface Tkinter e geração de PDF
+        ├── inference/              # Inferência e treinamento
+        ├── sources/                # Fontes, catálogo MapBiomas e dados PRODES
+        ├── spatial/                # Painéis, modelos e inferência espacial
+        ├── projection_core.py      # Projeções temporais
+        ├── reliability.py          # Confiabilidade das projeções
+        ├── settings.py             # Configurações e horizontes
+        └── validation.py           # Validações
 ```
 
 Não utilize caminhos absolutos do tipo `C:\Users\...` em comandos de execução do projeto.
@@ -291,11 +354,11 @@ Ainda não foi incluído um link público definitivo. Este espaço pode ser pree
 
 ---
 
-## História do projeto
+## Estória do projeto
 
 Certa noite, enquanto trabalhava, minha filha de oito anos me perguntou: “o que tanto você digitava e trabalhava no computador?”. Tentei explicar de várias formas, mas ela sempre me olhava com a mesma expressão de quem não entendeu nada.
 
-Então resolvi desenhar uma história em quadrinhos. Mostrei para ela e, para minha surpresa, ela disse: “Está fazendo um radar para não derrubar árvore”.
+Então resolvi desenhar uma história em quadrinhos. Mostrei para ela e, para minha surpresa, ela disse: “Está fazendo um radar para não cortar mais árvores, né”.
 
 Foi uma forma simples e inspiradora de resumir a ideia central do projeto, e por isso decidi compartilhar.
 
