@@ -1175,8 +1175,8 @@ def models_preload(ibge_code: str, request: Request, features: bool = Query(True
 def ml_dashboard_json(
     ibge_code: str,
     request: Request,
-    cost_fp: float = Query(1.0, ge=0.0, description="Custo de falso positivo (alarme falso)"),
-    cost_fn: float = Query(5.0, ge=0.0, description="Custo de falso negativo (desmate omitido)"),
+    #cost_fp: float = Query(1.0, ge=0.0, description="Custo de falso positivo (alarme falso)"),
+    #cost_fn: float = Query(5.0, ge=0.0, description="Custo de falso negativo (desmate omitido)"),
 ):
     """Dashboard ML em JSON: desmatamento anual, métricas, importância e detalhes XGBoost.
 
@@ -1186,6 +1186,8 @@ def ml_dashboard_json(
     _check_api_key(request)
     ibge = _resolve_ibge(None, ibge_code)
     try:
+        cost_fp=0.0
+        cost_fn=0.0
         payload = build_dashboard_payload(ibge, cost_fp=cost_fp, cost_fn=cost_fn)
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
@@ -1201,13 +1203,15 @@ def ml_dashboard_json(
 def ml_dashboard_html(
     ibge_code: str,
     request: Request,
-    cost_fp: float = Query(1.0, ge=0.0, description="Custo de falso positivo (alarme falso)"),
-    cost_fn: float = Query(5.0, ge=0.0, description="Custo de falso negativo (desmate omitido)"),
+    #cost_fp: float = Query(1.0, ge=0.0, description="Custo de falso positivo (alarme falso)"),
+    #cost_fn: float = Query(5.0, ge=0.0, description="Custo de falso negativo (desmate omitido)"),
 ):
-    """Dashboard ML interativo (HTML + Chart.js). Aceita cost_fp e cost_fn na query."""
+    """Dashboard ML interativo (HTML + Chart.js)."""
     _check_api_key(request)
     ibge = _resolve_ibge(None, ibge_code)
     try:
+        cost_fp=0.0
+        cost_fn=0.0
         payload = build_dashboard_payload(ibge, cost_fp=cost_fp, cost_fn=cost_fn)
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc

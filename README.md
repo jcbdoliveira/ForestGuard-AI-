@@ -194,7 +194,7 @@ Endpoints úteis:
 - Swagger: http://127.0.0.1:8080/docs
 - Health: http://127.0.0.1:8080/health
 
-No startup, o modelo e as análises dos horizontes 1–20 podem ser pré-carregados em memória, dependendo dos artefatos disponíveis.
+No startup, o modelo e as análises dos horizontes 1–20 podem ser pré-carregados em memória.
 
 ### 5) Interface desktop
 
@@ -259,7 +259,7 @@ Campos principais:
 | `ibge_code` | string | 7 dígitos (`4210100`) |
 | `years` | int | 1–20 |
 | `top_n` | int | 1–500 |
-| `target` | string opcional | `y_loss_1y` |
+| `target` | string | `y_loss_1y` |
 
 cURL:
 
@@ -294,9 +294,6 @@ export DEFAULT_DEMO_IBGE=4210100
 # Pré-carregar modelos em memória no startup da API
 export FORESTGUARD_PRELOAD_IBGE=4210100
 ```
-
-O arquivo `.env.example` pode servir como base para configurações locais.
-
 ---
 
 ## Estrutura do repositório
@@ -358,7 +355,7 @@ Ainda não foi incluído um link público definitivo. Este espaço pode ser pree
 
 Certa noite, enquanto trabalhava, minha filha de oito anos me perguntou: “o que tanto você digitava e trabalhava no computador?”. Tentei explicar de várias formas, mas ela sempre me olhava com a mesma expressão de quem não entendeu nada.
 
-Então resolvi desenhar uma história em quadrinhos. Mostrei para ela e, para minha surpresa, ela disse: “Está fazendo um radar para não cortar mais árvores, né”.
+Então resolvi criar uma história em quadrinhos. Mostrei para ela e, para minha surpresa, ela disse: “Está fazendo um mapa para não cortar mais árvores, né”.
 
 Foi uma forma simples e inspiradora de resumir a ideia central do projeto, e por isso decidi compartilhar.
 
@@ -367,3 +364,5 @@ Foi uma forma simples e inspiradora de resumir a ideia central do projeto, e por
     <img alt="História em quadrinhos do ForestGuard" src="public/quadrinhos.jpg" width="600">
   </picture>
 </p>
+
+Mafra-SC, 22 de outubro de 2026.
