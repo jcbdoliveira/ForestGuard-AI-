@@ -373,4 +373,6 @@ Foi uma forma simples e ingênua de resumir a ideia central do projeto, e por is
   </picture>
 </p>
 
-Mafra-SC, 22 de outubro de 2026.
+Mafra-SC, 23 de outubro de 2026.
+
+Julio Cesar Bueno de Oliveira
