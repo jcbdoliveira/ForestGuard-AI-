@@ -15,11 +15,10 @@ Sistema de apoio à decisão para estimar o risco relativo de supressão de vege
 ---
 
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/f5fdbeae-bafb-458c-8d2e-11679a2e2beb" width="700" controls>
-    Seu navegador não suporta a reprodução de vídeos.
-  </video>
+  <a href="https://github.com/jcbdoliveira/ForestGuard-AI-/raw/refs/heads/develop/public/ForestGuard_AI_Video.mp4">
+    <img src="public/ForestGuard_Capa.png" alt="Assistir vídeo do ForestGuard AI" width="700">
+  </a>
 </p>
-
 
 ---
 
