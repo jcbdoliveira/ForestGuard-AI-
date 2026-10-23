@@ -14,6 +14,18 @@ Sistema de apoio à decisão para estimar o risco relativo de supressão de vege
 
 ---
 
+<p align="center">
+  <a href="./public/ForestGuard_AI_Video.mp4">
+    <img
+      src="./public/ForestGuard_Capa.png"
+      alt="Assistir apresentação do ForestGuard IA"
+      width="700"
+    />
+  </a>
+</p>
+
+---
+
 ## Visão geral
 
 O ForestGuard foi pensado para apoiar órgãos ambientais, equipes técnicas e gestores públicos na priorização de áreas para investigação e fiscalização, quando a capacidade operacional é limitada.
@@ -347,7 +359,7 @@ Não utilize caminhos absolutos do tipo `C:\Users\...` em comandos de execução
 
 ## Link do vídeo / apresentação
 
-Ainda não foi incluído um link público definitivo. Este espaço pode ser preenchido com a URL do vídeo de apresentação ou demo do projeto.
+>[Video apresentação do projeto](https://drive.google.com/file/d/1vh0vJdTtg4tgpi5uYS-XpC25rIVJvM84/view?usp=sharing)
 
 ---
 
@@ -355,9 +367,9 @@ Ainda não foi incluído um link público definitivo. Este espaço pode ser pree
 
 Certa noite, enquanto trabalhava, minha filha de oito anos me perguntou: “o que tanto você digitava e trabalhava no computador?”. Tentei explicar de várias formas, mas ela sempre me olhava com a mesma expressão de quem não entendeu nada.
 
-Então resolvi criar uma história em quadrinhos. Mostrei para ela e, para minha surpresa, ela disse: “Está fazendo um mapa para não cortar mais árvores, né”.
+Então resolvi criar uma história em quadrinhos. Mostrei para ela e, para minha surpresa, ela disse: “Está fazendo um mapinha para não cortar mais árvores, né pai”.
 
-Foi uma forma simples e inspiradora de resumir a ideia central do projeto, e por isso decidi compartilhar.
+Foi uma forma simples e ingênua de resumir a ideia central do projeto, e por isso decidi compartilhar.
 
 <p align="center">
   <picture>
